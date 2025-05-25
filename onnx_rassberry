@@ -1,0 +1,58 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Not strictly needed on Pi, but harmless
+
+from ultralytics import YOLO
+import cv2
+from picamera.array import PiRGBArray
+from picamera import PiCamera
+import time
+
+# Load your trained YOLO model
+model = YOLO("/home/pi/Desktop/omar/best.onnx", task="detect")  # Update path as needed
+
+# Initialize PiCamera
+camera = PiCamera()
+camera.resolution = (640, 480)
+camera.framerate = 16
+rawCapture = PiRGBArray(camera, size=(640, 480))
+
+time.sleep(0.1)  # Allow camera to warm up
+
+for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
+    image = frame.array
+
+    # YOLO prediction on CPU
+    results = model.predict(source=image, conf=0.85, device='cpu')
+
+    # Annotate the frame with prediction results
+    annotated_frame = results[0].plot()
+
+    # Example values (replace with actual calibration data)
+    focal_length = 800  # Focal length in pixels
+    real_distance = 56  # Distance from the camera to the object in mm (5.6 cm)
+
+    # Extract bounding box information
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = box.xyxy[0]
+        pixel_width = x2 - x1
+        pixel_height = y2 - y1
+
+        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+        pixel_width, pixel_height = int(pixel_width), int(pixel_height)
+
+        real_width = (pixel_width * real_distance) / focal_length
+        real_height = (pixel_height * real_distance) / focal_length
+
+        text = f"Longueur: {real_width:.2f} mm, Largeur: {real_height:.2f} mm"
+        cv2.putText(annotated_frame, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Display the real-time video stream with annotations
+    cv2.imshow('YOLO Detection', annotated_frame)
+
+    key = cv2.waitKey(1) & 0xFF
+    rawCapture.truncate(0)  # Clear the stream for the next frame
+
+    if key == ord('q'):
+        break
+
+cv2.destroyAllWindows()
